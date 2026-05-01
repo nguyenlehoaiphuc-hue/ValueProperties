@@ -174,9 +174,10 @@ def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False)
             context.add_init_script(STEALTH_JS)
 
         page = context.new_page()
-        page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type in ("image", "media", "font", "stylesheet")
-            else r.continue_())
+        if not headless:
+            page.route("**/*", lambda r: r.abort()
+                if r.request.resource_type in ("image", "media", "font", "stylesheet")
+                else r.continue_())
 
         for pg in range(1, num_pages + 1):
             if pg == 1:
