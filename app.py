@@ -382,19 +382,26 @@ def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},
         )
+        ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
+        # Cho load JS + CSS để render card
         page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type in ("image", "media", "font", "stylesheet")
+            if r.request.resource_type == "media"
             else r.continue_())
 
         for pg in range(1, num_pages + 1):
             url = base_url if pg == 1 else f"{base_url}{sep}page={pg}"
             log(f"[nhatot] trang {pg}: {url}")
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(2500)
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                try:
+                    # nhatot dùng li[class*='adItem'] hoặc h2 bên trong card
+                    page.wait_for_selector("li h2, li[class*='adItem']", timeout=10000)
+                except Exception:
+                    page.wait_for_timeout(3000)
                 items = nt_parse_cards(page.content())
-            except Exception:
+            except Exception as e:
+                log(f"[nhatot] trang {pg}: lỗi — {e}")
                 continue
 
             if not items:
