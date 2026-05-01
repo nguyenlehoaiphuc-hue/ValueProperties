@@ -298,9 +298,9 @@ def scrape_batdongsan(base_url: str, num_pages: int, log) -> list[dict]:
                 page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 # Chờ JS render xong rồi mới đọc HTML
                 try:
-                    page.wait_for_selector("div.js__card", timeout=10000)
+                    page.wait_for_selector("div.js__card", timeout=8000)
                 except Exception:
-                    page.wait_for_timeout(3000)
+                    pass
                 items = bds_parse_cards(page.content())
             except Exception as e:
                 log(f"[batdongsan] trang {pg}: lỗi — {e}")
@@ -384,9 +384,8 @@ def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
         )
         ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
-        # Cho load JS + CSS để render card
         page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type == "media"
+            if r.request.resource_type in ("image", "media", "font", "stylesheet")
             else r.continue_())
 
         for pg in range(1, num_pages + 1):
@@ -394,11 +393,6 @@ def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
             log(f"[nhatot] trang {pg}: {url}")
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                try:
-                    # nhatot dùng li[class*='adItem'] hoặc h2 bên trong card
-                    page.wait_for_selector("li h2, li[class*='adItem']", timeout=10000)
-                except Exception:
-                    page.wait_for_timeout(3000)
                 items = nt_parse_cards(page.content())
             except Exception as e:
                 log(f"[nhatot] trang {pg}: lỗi — {e}")
