@@ -3,6 +3,7 @@ import time
 import random
 import json
 import subprocess
+import requests
 import sys
 from pathlib import Path
 from openpyxl.styles import PatternFill
@@ -371,42 +372,34 @@ def nt_parse_cards(html: str) -> list[dict]:
 def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
     results = []
     sep = "&" if "?" in base_url else "?"
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage",
-                  "--disable-blink-features=AutomationControlled"]
-        )
-        ctx  = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-        )
-        ctx.add_init_script(STEALTH_JS)
-        page = ctx.new_page()
-        page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type in ("image", "media", "font", "stylesheet")
-            else r.continue_())
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+        "Referer": NT_DOMAIN,
+    })
 
-        for pg in range(1, num_pages + 1):
-            url = base_url if pg == 1 else f"{base_url}{sep}page={pg}"
-            log(f"[nhatot] trang {pg}: {url}")
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                items = nt_parse_cards(page.content())
-            except Exception as e:
-                log(f"[nhatot] trang {pg}: lỗi — {e}")
-                continue
+    for pg in range(1, num_pages + 1):
+        url = base_url if pg == 1 else f"{base_url}{sep}page={pg}"
+        log(f"[nhatot] trang {pg}: {url}")
+        try:
+            r = session.get(url, timeout=15)
+            r.raise_for_status()
+            items = nt_parse_cards(r.text)
+        except Exception as e:
+            log(f"[nhatot] trang {pg}: lỗi — {e}")
+            continue
 
-            if not items:
-                log(f"[nhatot] trang {pg}: hết bài, dừng.")
-                break
+        if not items:
+            log(f"[nhatot] trang {pg}: hết bài, dừng.")
+            break
 
-            results.extend(items)
-            log(f"[nhatot] trang {pg}: {len(items)} bài")
-            time.sleep(1.0)
+        results.extend(items)
+        log(f"[nhatot] trang {pg}: {len(items)} bài")
+        time.sleep(1.0)
 
-        browser.close()
     return results
 
 # ─── Excel export ─────────────────────────────────────────────────────────────
