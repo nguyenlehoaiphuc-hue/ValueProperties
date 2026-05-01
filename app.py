@@ -158,9 +158,12 @@ def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False)
 
     with sync_playwright() as p:
         if headless:
-            # Cloud: browser thường, không persistent (tránh crash)
+            # Cloud: setup tối giản giống batdongsan (không stealth, không locale)
             browser = p.chromium.launch(headless=True, args=launch_args)
-            context = browser.new_context(**ctx_kwargs)
+            context = browser.new_context(
+                user_agent=ctx_kwargs["user_agent"],
+                viewport=ctx_kwargs["viewport"],
+            )
         else:
             # Local: persistent context để lưu session giải CAPTCHA
             ALN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,10 +171,12 @@ def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False)
             context = p.chromium.launch_persistent_context(
                 str(ALN_PROFILE_DIR), headless=False, args=launch_args, **ctx_kwargs
             )
+            context.add_init_script(STEALTH_JS)
 
-        context.add_init_script(STEALTH_JS)
         page = context.new_page()
-        page.route("**/*", BLOCK_HANDLER)
+        page.route("**/*", lambda r: r.abort()
+            if r.request.resource_type in ("image", "media", "font", "stylesheet")
+            else r.continue_())
 
         for pg in range(1, num_pages + 1):
             if pg == 1:
