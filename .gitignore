@@ -1,0 +1,10 @@
+node_modules/
+*.json
+*.html
+__pycache__/
+*.pyc
+.playwright/
+scraper.py
+scraper_bds.py
+toExcel.py
+index.js
