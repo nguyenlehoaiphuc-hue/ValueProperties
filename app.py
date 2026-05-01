@@ -286,22 +286,24 @@ def scrape_batdongsan(base_url: str, num_pages: int, log) -> list[dict]:
         )
         ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
-        # Không block stylesheet/font — BDS cần chúng để render card
+        # Không block gì cả — BDS cần JS + CSS để render card trên cloud
         page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type in ("image", "media")
+            if r.request.resource_type == "media"
             else r.continue_())
 
         for pg in range(1, num_pages + 1):
             url = base_url if pg == 1 else f"{base_url.rstrip('/')}/p{pg}"
             log(f"[batdongsan] trang {pg}: {url}")
             try:
-                page.goto(url, wait_until="networkidle", timeout=20000)
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                # Chờ JS render xong rồi mới đọc HTML
                 try:
-                    page.wait_for_selector("div.js__card", timeout=8000)
+                    page.wait_for_selector("div.js__card", timeout=10000)
                 except Exception:
-                    pass
+                    page.wait_for_timeout(3000)
                 items = bds_parse_cards(page.content())
-            except Exception:
+            except Exception as e:
+                log(f"[batdongsan] trang {pg}: lỗi — {e}")
                 continue
 
             if not items:
