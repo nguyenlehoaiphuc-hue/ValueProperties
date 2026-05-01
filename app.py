@@ -16,8 +16,11 @@ from urllib.parse import urljoin
 # Tự cài Playwright browser khi chạy trên cloud
 @st.cache_resource
 def install_playwright():
-    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
-                   check=False, capture_output=True)
+    # --with-deps tự động cài tất cả system library cần thiết cho Chromium
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+        check=False, capture_output=True
+    )
 
 install_playwright()
 
