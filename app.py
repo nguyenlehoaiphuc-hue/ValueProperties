@@ -3,7 +3,6 @@ import time
 import random
 import json
 import subprocess
-import requests
 import sys
 from pathlib import Path
 from openpyxl.styles import PatternFill
@@ -274,48 +273,46 @@ def bds_parse_cards(html: str) -> list[dict]:
 
 def scrape_batdongsan(base_url: str, num_pages: int, log) -> list[dict]:
     results = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage",
-                  "--disable-blink-features=AutomationControlled"]
-        )
-        ctx  = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-        )
-        ctx.add_init_script(STEALTH_JS)
-        page = ctx.new_page()
-        # Không block gì cả — BDS cần JS + CSS để render card trên cloud
-        page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type == "media"
-            else r.continue_())
-
-        for pg in range(1, num_pages + 1):
-            url = base_url if pg == 1 else f"{base_url.rstrip('/')}/p{pg}"
-            log(f"[batdongsan] trang {pg}: {url}")
-            try:
+    for pg in range(1, num_pages + 1):
+        url = base_url if pg == 1 else f"{base_url.rstrip('/')}/p{pg}"
+        log(f"[batdongsan] trang {pg}: {url}")
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage",
+                          "--disable-blink-features=AutomationControlled"]
+                )
+                ctx  = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    viewport={"width": 1280, "height": 800},
+                )
+                ctx.add_init_script(STEALTH_JS)
+                page = ctx.new_page()
+                page.route("**/*", lambda r: r.abort()
+                    if r.request.resource_type == "media"
+                    else r.continue_())
                 page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                # Chờ JS render xong rồi mới đọc HTML
                 try:
                     page.wait_for_selector("div.js__card", timeout=8000)
                 except Exception:
                     pass
-                items = bds_parse_cards(page.content())
-            except Exception as e:
-                log(f"[batdongsan] trang {pg}: lỗi — {e}")
-                continue
+                html = page.content()
+                browser.close()
+            items = bds_parse_cards(html)
+        except Exception as e:
+            log(f"[batdongsan] trang {pg}: lỗi — {e}")
+            continue
 
-            if not items:
-                log(f"[batdongsan] trang {pg}: hết bài, dừng.")
-                break
+        if not items:
+            log(f"[batdongsan] trang {pg}: hết bài, dừng.")
+            break
 
-            results.extend(items)
-            log(f"[batdongsan] trang {pg}: {len(items)} bài")
-            time.sleep(1.0)
+        results.extend(items)
+        log(f"[batdongsan] trang {pg}: {len(items)} bài")
+        time.sleep(1.0)
 
-        browser.close()
     return results
 
 # ─── nhatot (Playwright) ──────────────────────────────────────────────────────
@@ -369,25 +366,39 @@ def nt_parse_cards(html: str) -> list[dict]:
             continue
     return items
 
+def _pw_fetch(url: str) -> str:
+    """Dùng browser mới mỗi lần để tránh memory leak trên cloud."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"]
+        )
+        ctx  = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+        )
+        ctx.add_init_script(STEALTH_JS)
+        page = ctx.new_page()
+        page.route("**/*", lambda r: r.abort()
+            if r.request.resource_type in ("image", "media", "font", "stylesheet")
+            else r.continue_())
+        page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        html = page.content()
+        browser.close()
+    return html
+
 def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
     results = []
     sep = "&" if "?" in base_url else "?"
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
-        "Referer": NT_DOMAIN,
-    })
 
     for pg in range(1, num_pages + 1):
         url = base_url if pg == 1 else f"{base_url}{sep}page={pg}"
         log(f"[nhatot] trang {pg}: {url}")
         try:
-            r = session.get(url, timeout=15)
-            r.raise_for_status()
-            items = nt_parse_cards(r.text)
+            html  = _pw_fetch(url)
+            items = nt_parse_cards(html)
         except Exception as e:
             log(f"[nhatot] trang {pg}: lỗi — {e}")
             continue
