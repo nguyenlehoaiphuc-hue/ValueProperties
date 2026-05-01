@@ -367,12 +367,12 @@ def nt_parse_cards(html: str) -> list[dict]:
     return items
 
 def _pw_fetch(url: str) -> str:
-    """Dùng browser mới mỗi lần để tránh memory leak trên cloud."""
+    """Dùng browser mới mỗi lần. Chờ Cloudflare JS challenge tự giải xong."""
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage",
-                  "--disable-blink-features=AutomationControlled"]
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            # KHÔNG dùng --disable-blink-features — CF detect flag này
         )
         ctx  = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -381,10 +381,12 @@ def _pw_fetch(url: str) -> str:
         )
         ctx.add_init_script(STEALTH_JS)
         page = ctx.new_page()
+        # Cho phép script chạy để CF challenge tự giải, chỉ block media nặng
         page.route("**/*", lambda r: r.abort()
-            if r.request.resource_type in ("image", "media", "font", "stylesheet")
+            if r.request.resource_type in ("image", "media")
             else r.continue_())
-        page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        # networkidle chờ CF redirect xong
+        page.goto(url, wait_until="networkidle", timeout=30000)
         html = page.content()
         browser.close()
     return html
@@ -398,10 +400,6 @@ def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
         log(f"[nhatot] trang {pg}: {url}")
         try:
             html  = _pw_fetch(url)
-            # Debug: log 300 ký tự đầu của body để xem cấu trúc
-            from bs4 import BeautifulSoup as _BS
-            _body = _BS(html, "html.parser").find("body")
-            log(f"[nhatot] debug HTML: {str(_body)[:300] if _body else html[:300]}")
             items = nt_parse_cards(html)
         except Exception as e:
             log(f"[nhatot] trang {pg}: lỗi — {e}")
