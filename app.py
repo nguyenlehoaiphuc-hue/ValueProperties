@@ -143,21 +143,30 @@ def _check_captcha(page, log, restore_handler=BLOCK_HANDLER) -> bool:
 
 def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False) -> list[dict]:
     results = []
-    ALN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    launch_args = ["--no-sandbox", "--disable-blink-features=AutomationControlled",
+                   "--disable-dev-shm-usage"]
+    ctx_kwargs = dict(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        viewport={"width": 1366, "height": 768},
+        locale="vi-VN",
+        timezone_id="Asia/Ho_Chi_Minh",
+    )
 
     with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            str(ALN_PROFILE_DIR),
-            headless=headless,  # False khi local để giải CAPTCHA, True khi cloud
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768},
-            locale="vi-VN",
-            timezone_id="Asia/Ho_Chi_Minh",
-        )
-        context.add_init_script(STEALTH_JS)
+        if headless:
+            # Cloud: browser thường, không persistent (tránh crash)
+            browser = p.chromium.launch(headless=True, args=launch_args)
+            context = browser.new_context(**ctx_kwargs)
+        else:
+            # Local: persistent context để lưu session giải CAPTCHA
+            ALN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            browser = None
+            context = p.chromium.launch_persistent_context(
+                str(ALN_PROFILE_DIR), headless=False, args=launch_args, **ctx_kwargs
+            )
 
+        context.add_init_script(STEALTH_JS)
         page = context.new_page()
         page.route("**/*", BLOCK_HANDLER)
 
@@ -211,6 +220,8 @@ def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False)
             time.sleep(random.uniform(2.0, 3.5))
 
         context.close()
+        if browser:
+            browser.close()
 
     log(f"[alonhadat] xong — {len(results)} bài")
     return results
@@ -254,7 +265,11 @@ def bds_parse_cards(html: str) -> list[dict]:
 def scrape_batdongsan(base_url: str, num_pages: int, log) -> list[dict]:
     results = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"]
+        )
         ctx  = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -344,7 +359,11 @@ def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
     results = []
     sep = "&" if "?" in base_url else "?"
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"]
+        )
         ctx  = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
