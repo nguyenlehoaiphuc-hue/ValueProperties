@@ -398,6 +398,10 @@ def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
         log(f"[nhatot] trang {pg}: {url}")
         try:
             html  = _pw_fetch(url)
+            # Debug: log 300 ký tự đầu của body để xem cấu trúc
+            from bs4 import BeautifulSoup as _BS
+            _body = _BS(html, "html.parser").find("body")
+            log(f"[nhatot] debug HTML: {str(_body)[:300] if _body else html[:300]}")
             items = nt_parse_cards(html)
         except Exception as e:
             log(f"[nhatot] trang {pg}: lỗi — {e}")
