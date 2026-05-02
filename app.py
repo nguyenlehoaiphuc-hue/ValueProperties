@@ -477,6 +477,9 @@ def scrape_muaban(base_url: str, num_pages: int, log) -> list[dict]:
         log(f"[muaban] trang {pg}: {url}")
         try:
             html  = _pw_fetch(url)
+            soup  = BeautifulSoup(html, "html.parser")
+            body  = soup.find("body")
+            log(f"[muaban] debug: {str(body)[:400] if body else html[:400]}")
             items = mb_parse_cards(html)
         except Exception as e:
             log(f"[muaban] trang {pg}: lỗi — {e}")
