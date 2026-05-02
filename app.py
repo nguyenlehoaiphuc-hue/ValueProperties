@@ -148,37 +148,27 @@ def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False)
     results = []
     launch_args = ["--no-sandbox", "--disable-blink-features=AutomationControlled",
                    "--disable-dev-shm-usage"]
-    ctx_kwargs = dict(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        viewport={"width": 1366, "height": 768},
-        locale="vi-VN",
-        timezone_id="Asia/Ho_Chi_Minh",
-    )
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-    with sync_playwright() as p:
-        if headless:
-            # Cloud: setup tối giản giống batdongsan (không stealth, không locale)
-            browser = p.chromium.launch(headless=True, args=launch_args)
-            context = browser.new_context(
-                user_agent=ctx_kwargs["user_agent"],
-                viewport=ctx_kwargs["viewport"],
-            )
-        else:
-            # Local: persistent context để lưu session giải CAPTCHA
-            ALN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            browser = None
+    if not headless:
+        # Local: persistent context — dùng suốt session để giữ cookie CAPTCHA
+        ALN_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        with sync_playwright() as p:
             context = p.chromium.launch_persistent_context(
-                str(ALN_PROFILE_DIR), headless=False, args=launch_args, **ctx_kwargs
+                str(ALN_PROFILE_DIR), headless=False, args=launch_args,
+                user_agent=ua, viewport={"width": 1366, "height": 768},
+                locale="vi-VN", timezone_id="Asia/Ho_Chi_Minh",
             )
             context.add_init_script(STEALTH_JS)
-
-        page = context.new_page()
-        if not headless:
+            page = context.new_page()
             page.route("**/*", lambda r: r.abort()
                 if r.request.resource_type in ("image", "media", "font", "stylesheet")
                 else r.continue_())
-
+            results = _aln_scrape_pages(base_url, num_pages, page, log)
+            context.close()
+    else:
+        # Cloud: browser mới cho mỗi trang list để tránh OOM
         for pg in range(1, num_pages + 1):
             if pg == 1:
                 url = base_url
@@ -190,49 +180,83 @@ def scrape_alonhadat(base_url: str, num_pages: int, log, headless: bool = False)
 
             log(f"[alonhadat] trang {pg}: {url}")
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(2000)
-            except Exception as e:
-                log(f"[alonhadat] trang {pg}: lỗi load — {e}")
-                continue
-
-            if not _check_captcha(page, log):
-                break
-
-            soup = BeautifulSoup(page.content(), "html.parser")
-            article_links = [
-                urljoin(ALN_DOMAIN, a["href"])
-                for art in soup.select("article.property-item")
-                if (a := art.select_one("a.link")) and a.get("href")
-            ]
-
-            if not article_links:
-                log(f"[alonhadat] trang {pg}: hết bài, dừng.")
-                break
-
-            log(f"[alonhadat] trang {pg}: {len(article_links)} bài")
-
-            for link in article_links:
-                try:
-                    page.goto(link, wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(1000)
-                    if not _check_captcha(page, log):
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True, args=launch_args)
+                    context = browser.new_context(user_agent=ua,
+                                                  viewport={"width": 1366, "height": 768})
+                    page = context.new_page()
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    soup = BeautifulSoup(page.content(), "html.parser")
+                    article_links = [
+                        urljoin(ALN_DOMAIN, a["href"])
+                        for art in soup.select("article.property-item")
+                        if (a := art.select_one("a.link")) and a.get("href")
+                    ]
+                    if not article_links:
+                        browser.close()
+                        log(f"[alonhadat] trang {pg}: hết bài, dừng.")
                         break
-                    item = aln_parse_detail(BeautifulSoup(page.content(), "html.parser"), link)
-                    if item.get("tieu_de"):
-                        results.append(item)
-                        log(f"  ✓ {item['tieu_de'][:60]}")
-                except Exception as e:
-                    log(f"  ✗ lỗi chi tiết: {e}")
-                time.sleep(random.uniform(1.0, 2.0))
-
-            time.sleep(random.uniform(2.0, 3.5))
-
-        context.close()
-        if browser:
-            browser.close()
+                    log(f"[alonhadat] trang {pg}: {len(article_links)} bài")
+                    for link in article_links:
+                        try:
+                            page.goto(link, wait_until="domcontentloaded", timeout=30000)
+                            item = aln_parse_detail(
+                                BeautifulSoup(page.content(), "html.parser"), link)
+                            if item.get("tieu_de"):
+                                results.append(item)
+                                log(f"  ✓ {item['tieu_de'][:60]}")
+                        except Exception as e:
+                            log(f"  ✗ {e}")
+                    browser.close()
+            except Exception as e:
+                log(f"[alonhadat] trang {pg}: lỗi — {e}")
 
     log(f"[alonhadat] xong — {len(results)} bài")
+    return results
+
+def _aln_scrape_pages(base_url, num_pages, page, log):
+    results = []
+    for pg in range(1, num_pages + 1):
+        if pg == 1:
+            url = base_url
+        else:
+            base = base_url.rstrip("/")
+            if base.endswith(".html"):
+                base = base[:-5]
+            url = f"{base}/trang-{pg}.html"
+        log(f"[alonhadat] trang {pg}: {url}")
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            log(f"[alonhadat] trang {pg}: lỗi load — {e}")
+            continue
+        if not _check_captcha(page, log):
+            break
+        soup = BeautifulSoup(page.content(), "html.parser")
+        article_links = [
+            urljoin(ALN_DOMAIN, a["href"])
+            for art in soup.select("article.property-item")
+            if (a := art.select_one("a.link")) and a.get("href")
+        ]
+        if not article_links:
+            log(f"[alonhadat] trang {pg}: hết bài, dừng.")
+            break
+        log(f"[alonhadat] trang {pg}: {len(article_links)} bài")
+        for link in article_links:
+            try:
+                page.goto(link, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(1000)
+                if not _check_captcha(page, log):
+                    break
+                item = aln_parse_detail(BeautifulSoup(page.content(), "html.parser"), link)
+                if item.get("tieu_de"):
+                    results.append(item)
+                    log(f"  ✓ {item['tieu_de'][:60]}")
+            except Exception as e:
+                log(f"  ✗ lỗi chi tiết: {e}")
+            time.sleep(random.uniform(1.0, 2.0))
+        time.sleep(random.uniform(2.0, 3.5))
     return results
 
 # ─── batdongsan (Playwright) ──────────────────────────────────────────────────
