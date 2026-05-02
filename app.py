@@ -635,12 +635,38 @@ cloud_mode = st.toggle(
     help="Bật khi deploy trên Streamlit Cloud. Tắt khi chạy máy tính cá nhân để dùng browser thật giải CAPTCHA."
 )
 
+# Khôi phục kết quả từ session_state nếu có
+if "df_result" not in st.session_state:
+    st.session_state.df_result = None
+
+def _show_results(df):
+    st.success(f"Tổng cộng {len(df)} bài đăng")
+    show_cols = ["nguon", "tieu_de", "gia", "dien_tich", "dia_chi",
+                 "loai_duong", "gia_nha (tr)", "don_gia_dat (tr/m²)"]
+    show_cols = [c for c in show_cols if c in df.columns]
+    styler = df[show_cols].style
+    if "don_gia_dat (tr/m²)" in show_cols:
+        styler = styler.map(
+            lambda v: "background-color: #FF9999" if isinstance(v, (int, float)) and v < 0 else "",
+            subset=["don_gia_dat (tr/m²)"]
+        )
+    st.dataframe(styler, use_container_width=True)
+    st.download_button(
+        "📥 Tải Excel", data=to_excel(df), file_name="bds.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+# Hiển thị lại kết quả cũ nếu đã có trong session
+if st.session_state.df_result is not None:
+    _show_results(st.session_state.df_result)
+
 if st.button("🚀 Scrape", use_container_width=True):
     if not any([url_aln, url_bds, url_mb]):
         st.warning("Vui lòng dán ít nhất 1 link.")
     else:
-        results  = []
-        log_box  = st.empty()
+        results = []
+        log_box = st.empty()
         logs: list[str] = []
 
         def log(msg: str):
@@ -658,7 +684,6 @@ if st.button("🚀 Scrape", use_container_width=True):
                 log(f"[{nguon}] cache — {len(rows)} bài (cập nhật {age_min} phút trước)")
                 results.extend(rows)
                 return
-            # Cache miss → scrape
             st.write(f"📥 Đang scrape {nguon}…")
             with _scrape_lock:
                 try:
@@ -679,25 +704,7 @@ if st.button("🚀 Scrape", use_container_width=True):
         if results:
             df = pd.DataFrame(results)
             df = tinh_toan(df)
-            st.success(f"Tổng cộng {len(df)} bài đăng")
-
-            show_cols = ["nguon", "tieu_de", "gia", "dien_tich", "dia_chi",
-                         "loai_duong", "gia_nha (tr)", "don_gia_dat (tr/m²)"]
-            show_cols = [c for c in show_cols if c in df.columns]
-
-            styler = df[show_cols].style
-            if "don_gia_dat (tr/m²)" in show_cols:
-                styler = styler.map(
-                    lambda v: "background-color: #FF9999" if isinstance(v, (int, float)) and v < 0 else "",
-                    subset=["don_gia_dat (tr/m²)"]
-                )
-            st.dataframe(styler, use_container_width=True)
-            st.download_button(
-                "📥 Tải Excel",
-                data=to_excel(df),
-                file_name="bds.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+            st.session_state.df_result = df
+            _show_results(df)
         else:
             st.info("Không tìm thấy bài đăng nào.")
