@@ -2,8 +2,11 @@ import re
 import time
 import random
 import json
+import sqlite3
+import threading
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from openpyxl.styles import PatternFill
 import streamlit as st
@@ -23,6 +26,42 @@ def install_playwright():
     )
 
 install_playwright()
+
+# ─── Cache (SQLite) ───────────────────────────────────────────────────────────
+CACHE_DB   = Path.home() / ".bds_scraper" / "cache.db"
+CACHE_TTL  = 6   # giờ
+_scrape_lock = threading.Semaphore(2)  # tối đa 2 browser đồng thời
+
+def _init_db():
+    CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(CACHE_DB) as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS cache (
+            key TEXT PRIMARY KEY,
+            scraped_at TEXT,
+            data TEXT
+        )""")
+
+def cache_get(key: str):
+    """Trả (items, scraped_at) nếu còn mới, ngược lại None."""
+    _init_db()
+    with sqlite3.connect(CACHE_DB) as c:
+        row = c.execute("SELECT data, scraped_at FROM cache WHERE key=?",
+                        (key,)).fetchone()
+    if not row:
+        return None
+    age = datetime.now() - datetime.fromisoformat(row[1])
+    if age > timedelta(hours=CACHE_TTL):
+        return None
+    return json.loads(row[0]), row[1]
+
+def cache_set(key: str, items: list):
+    _init_db()
+    with sqlite3.connect(CACHE_DB) as c:
+        c.execute("INSERT OR REPLACE INTO cache VALUES (?,?,?)",
+                  (key, datetime.now().isoformat(), json.dumps(items, ensure_ascii=False)))
+
+def _cache_key(nguon: str, url: str, pages: int) -> str:
+    return f"{nguon}|{url.strip().rstrip('/')}|p{pages}"
 
 ALN_DOMAIN = "https://alonhadat.com.vn"
 BDS_DOMAIN = "https://batdongsan.com.vn"
@@ -608,32 +647,34 @@ if st.button("🚀 Scrape", use_container_width=True):
             logs.append(msg)
             log_box.code("\n".join(logs[-20:]))
 
-        if url_aln:
-            st.write("📥 Đang scrape alonhadat…")
-            try:
-                rows = scrape_alonhadat(url_aln.strip(), num_pages, log, headless=cloud_mode)
+        def run_with_cache(nguon, url, scrape_fn, *args):
+            if not url:
+                return
+            key = _cache_key(nguon, url, num_pages)
+            hit = cache_get(key)
+            if hit:
+                rows, scraped_at = hit
+                age_min = int((datetime.now() - datetime.fromisoformat(scraped_at)).total_seconds() / 60)
+                log(f"[{nguon}] cache — {len(rows)} bài (cập nhật {age_min} phút trước)")
                 results.extend(rows)
-                log(f"[alonhadat] xong — {len(rows)} bài")
-            except Exception as e:
-                st.warning(f"alonhadat lỗi: {e}")
+                return
+            # Cache miss → scrape
+            st.write(f"📥 Đang scrape {nguon}…")
+            with _scrape_lock:
+                try:
+                    rows = scrape_fn(*args)
+                    cache_set(key, rows)
+                    results.extend(rows)
+                    log(f"[{nguon}] xong — {len(rows)} bài (đã lưu cache)")
+                except Exception as e:
+                    st.warning(f"{nguon} lỗi: {e}")
 
-        if url_bds:
-            st.write("📥 Đang scrape batdongsan…")
-            try:
-                rows = scrape_batdongsan(url_bds.strip(), num_pages, log)
-                results.extend(rows)
-                log(f"[batdongsan] xong — {len(rows)} bài")
-            except Exception as e:
-                st.warning(f"batdongsan lỗi: {e}")
-
-        if url_mb:
-            st.write("📥 Đang scrape muaban…")
-            try:
-                rows = scrape_muaban(url_mb.strip(), num_pages, log)
-                results.extend(rows)
-                log(f"[muaban] xong — {len(rows)} bài")
-            except Exception as e:
-                st.warning(f"muaban lỗi: {e}")
+        run_with_cache("alonhadat", url_aln, scrape_alonhadat,
+                       url_aln.strip(), num_pages, log, cloud_mode)
+        run_with_cache("batdongsan", url_bds, scrape_batdongsan,
+                       url_bds.strip(), num_pages, log)
+        run_with_cache("muaban", url_mb, scrape_muaban,
+                       url_mb.strip(), num_pages, log)
 
         if results:
             df = pd.DataFrame(results)
