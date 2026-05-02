@@ -413,29 +413,79 @@ def _pw_fetch(url: str) -> str:
         browser.close()
     return html
 
-def scrape_nhatot(base_url: str, num_pages: int, log) -> list[dict]:
+# ─── muaban.net (Playwright) ──────────────────────────────────────────────────
+MB_DOMAIN = "https://muaban.net"
+
+def mb_parse_cards(html: str) -> list[dict]:
+    soup  = BeautifulSoup(html, "html.parser")
+    items = []
+    for a in soup.select("a.over[href]"):
+        try:
+            href = a["href"]
+            if not href.startswith("http"):
+                href = MB_DOMAIN + href
+
+            tieu_de = clean(a.select_one("h3").get_text()) if a.select_one("h3") else ""
+            if not tieu_de:
+                continue
+
+            card = a.find_parent("div")
+
+            gia = ""
+            for el in card.select("div, span"):
+                t = el.get_text(strip=True)
+                m = re.search(r"([\d,\.]+\s*(?:tỷ|triệu))", t)
+                if m:
+                    gia = m.group(1).strip(); break
+
+            dien_tich = ""
+            for span in card.select("span"):
+                t = span.get_text(strip=True)
+                if "m²" in t and re.search(r"^\d", t):
+                    dien_tich = clean(t.split("·")[0]); break
+
+            dia_parts = []
+            for a2 in card.select("a[href]"):
+                t = a2.get_text(strip=True).rstrip(",")
+                if any(kw in t.lower() for kw in ("phường", "quận", "huyện", "tp")):
+                    dia_parts.append(t)
+            for span in card.select("span"):
+                t = span.get_text(strip=True)
+                if t in ("TP.HCM", "Hà Nội", "Đà Nẵng") or "tỉnh" in t.lower():
+                    dia_parts.append(t)
+            dia_chi = ", ".join(dict.fromkeys(dia_parts))
+
+            items.append({
+                "nguon": "muaban", "tieu_de": tieu_de, "url": href,
+                "ngay_dang": "", "gia": gia, "dien_tich": dien_tich,
+                "dia_chi": dia_chi,
+                "loai_duong": extract_loai_duong(tieu_de + " " + dia_chi),
+                "mo_ta": "",
+            })
+        except Exception:
+            continue
+    return items
+
+def scrape_muaban(base_url: str, num_pages: int, log) -> list[dict]:
     results = []
     sep = "&" if "?" in base_url else "?"
 
     for pg in range(1, num_pages + 1):
         url = base_url if pg == 1 else f"{base_url}{sep}page={pg}"
-        log(f"[nhatot] trang {pg}: {url}")
+        log(f"[muaban] trang {pg}: {url}")
         try:
             html  = _pw_fetch(url)
-            if "_cf_chl_opt" in html or "challenge-error-text" in html:
-                log("⚠️ nhatot bị Cloudflare chặn trên cloud. Dùng local để scrape nhatot.")
-                break
-            items = nt_parse_cards(html)
+            items = mb_parse_cards(html)
         except Exception as e:
-            log(f"[nhatot] trang {pg}: lỗi — {e}")
+            log(f"[muaban] trang {pg}: lỗi — {e}")
             continue
 
         if not items:
-            log(f"[nhatot] trang {pg}: hết bài, dừng.")
+            log(f"[muaban] trang {pg}: hết bài, dừng.")
             break
 
         results.extend(items)
-        log(f"[nhatot] trang {pg}: {len(items)} bài")
+        log(f"[muaban] trang {pg}: {len(items)} bài")
         time.sleep(1.0)
 
     return results
@@ -530,7 +580,7 @@ with col1:
 with col2:
     url_bds = st.text_input("batdongsan.com.vn", placeholder="https://batdongsan.com.vn/...")
 with col3:
-    url_nt  = st.text_input("nhatot.com", placeholder="https://www.nhatot.com/...")
+    url_mb  = st.text_input("muaban.net", placeholder="https://muaban.net/...")
 
 num_pages = st.slider("Số trang cần scrape", 1, 20, 3)
 cloud_mode = st.toggle(
@@ -540,7 +590,7 @@ cloud_mode = st.toggle(
 )
 
 if st.button("🚀 Scrape", use_container_width=True):
-    if not any([url_aln, url_bds, url_nt]):
+    if not any([url_aln, url_bds, url_mb]):
         st.warning("Vui lòng dán ít nhất 1 link.")
     else:
         results  = []
@@ -569,14 +619,14 @@ if st.button("🚀 Scrape", use_container_width=True):
             except Exception as e:
                 st.warning(f"batdongsan lỗi: {e}")
 
-        if url_nt:
-            st.write("📥 Đang scrape nhatot…")
+        if url_mb:
+            st.write("📥 Đang scrape muaban…")
             try:
-                rows = scrape_nhatot(url_nt.strip(), num_pages, log)
+                rows = scrape_muaban(url_mb.strip(), num_pages, log)
                 results.extend(rows)
-                log(f"[nhatot] xong — {len(rows)} bài")
+                log(f"[muaban] xong — {len(rows)} bài")
             except Exception as e:
-                st.warning(f"nhatot lỗi: {e}")
+                st.warning(f"muaban lỗi: {e}")
 
         if results:
             df = pd.DataFrame(results)
