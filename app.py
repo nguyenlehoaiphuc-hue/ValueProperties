@@ -390,7 +390,7 @@ def nt_parse_cards(html: str) -> list[dict]:
             continue
     return items
 
-def _pw_fetch(url: str) -> str:
+def _pw_fetch(url: str, wait_selector: str = None) -> str:
     """Dùng browser mới mỗi lần. headless=False nếu có DISPLAY (VPS/local)."""
     import os
     headless = not bool(os.environ.get("DISPLAY"))
@@ -411,6 +411,11 @@ def _pw_fetch(url: str) -> str:
             if r.request.resource_type in ("image", "media", "font", "stylesheet")
             else r.continue_())
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        if wait_selector:
+            try:
+                page.wait_for_selector(wait_selector, timeout=8000)
+            except Exception:
+                pass
         html = page.content()
         browser.close()
     return html
@@ -476,10 +481,7 @@ def scrape_muaban(base_url: str, num_pages: int, log) -> list[dict]:
         url = base_url if pg == 1 else f"{base_url}{sep}page={pg}"
         log(f"[muaban] trang {pg}: {url}")
         try:
-            html  = _pw_fetch(url)
-            soup  = BeautifulSoup(html, "html.parser")
-            body  = soup.find("body")
-            log(f"[muaban] debug: {str(body)[:400] if body else html[:400]}")
+            html  = _pw_fetch(url, wait_selector="a.over")
             items = mb_parse_cards(html)
         except Exception as e:
             log(f"[muaban] trang {pg}: lỗi — {e}")
