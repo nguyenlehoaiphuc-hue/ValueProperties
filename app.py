@@ -391,10 +391,12 @@ def nt_parse_cards(html: str) -> list[dict]:
     return items
 
 def _pw_fetch(url: str) -> str:
-    """Dùng browser mới mỗi lần để tránh memory leak trên cloud."""
+    """Dùng browser mới mỗi lần. headless=False nếu có DISPLAY (VPS/local)."""
+    import os
+    headless = not bool(os.environ.get("DISPLAY"))
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,
+            headless=headless,
             args=["--no-sandbox", "--disable-dev-shm-usage",
                   "--disable-blink-features=AutomationControlled"]
         )
