@@ -27,6 +27,37 @@ def install_playwright():
 
 install_playwright()
 
+# ─── Xác thực người dùng ─────────────────────────────────────────────────────
+import yaml
+import streamlit_authenticator as stauth
+from yaml.loader import SafeLoader
+
+AUTH_CONFIG = Path.home() / ".bds_scraper" / "auth_config.yaml"
+
+def _load_auth():
+    if not AUTH_CONFIG.exists():
+        return None
+    with open(AUTH_CONFIG) as f:
+        return yaml.load(f, Loader=SafeLoader)
+
+_auth_cfg = _load_auth()
+if _auth_cfg:
+    authenticator = stauth.Authenticate(
+        _auth_cfg["credentials"],
+        _auth_cfg["cookie"]["name"],
+        _auth_cfg["cookie"]["key"],
+        _auth_cfg["cookie"]["expiry_days"],
+    )
+    authenticator.login()
+    if not st.session_state.get("authentication_status"):
+        if st.session_state.get("authentication_status") is False:
+            st.error("Sai username hoặc password")
+        else:
+            st.info("Vui lòng đăng nhập để sử dụng")
+        st.stop()
+    authenticator.logout("Đăng xuất", "sidebar")
+    st.sidebar.write(f"👤 {st.session_state.get('name', '')}")
+
 # ─── Cache (SQLite) ───────────────────────────────────────────────────────────
 CACHE_DB   = Path.home() / ".bds_scraper" / "cache.db"
 CACHE_TTL  = 6   # giờ
