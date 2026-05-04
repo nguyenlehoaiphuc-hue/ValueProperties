@@ -649,93 +649,148 @@ def to_excel(df: pd.DataFrame) -> bytes:
 # ─── Streamlit UI ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="BDS Scraper", layout="wide", page_icon="🏠")
 st.title("🏠 BDS Scraper")
-st.caption("Dán link danh sách từ mỗi trang vào ô tương ứng rồi nhấn Scrape")
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    url_aln = st.text_input("alonhadat.com.vn", placeholder="https://alonhadat.com.vn/...")
-with col2:
-    url_bds = st.text_input("batdongsan.com.vn", placeholder="https://batdongsan.com.vn/...")
-with col3:
-    url_mb  = st.text_input("muaban.net", placeholder="https://muaban.net/...")
+tab_main, tab_guide = st.tabs(["🔍 Tra cứu", "📖 Hướng dẫn"])
 
-num_pages = st.slider("Số trang cần scrape", 1, 20, 3)
-cloud_mode = st.toggle(
-    "☁️ Chế độ Cloud (tắt khi chạy local để giải CAPTCHA alonhadat)",
-    value=True,
-    help="Bật khi deploy trên Streamlit Cloud. Tắt khi chạy máy tính cá nhân để dùng browser thật giải CAPTCHA."
-)
+with tab_guide:
+    st.markdown("""
+## Hướng dẫn sử dụng
 
-# Khôi phục kết quả từ session_state nếu có
-if "df_result" not in st.session_state:
-    st.session_state.df_result = None
+### Mục đích
+Tra cứu giá bất động sản từ 3 trang: **alonhadat.com.vn**, **batdongsan.com.vn**, **muaban.net** — hỗ trợ thẩm định giá tài sản đảm bảo.
 
-def _show_results(df):
-    st.success(f"Tổng cộng {len(df)} bài đăng")
-    show_cols = ["nguon", "tieu_de", "gia", "dien_tich", "dia_chi",
-                 "loai_duong", "gia_nha (tr)", "don_gia_dat (tr/m²)"]
-    show_cols = [c for c in show_cols if c in df.columns]
-    styler = df[show_cols].style
-    if "don_gia_dat (tr/m²)" in show_cols:
-        styler = styler.map(
-            lambda v: "background-color: #FF9999" if isinstance(v, (int, float)) and v < 0 else "",
-            subset=["don_gia_dat (tr/m²)"]
-        )
-    st.dataframe(styler, use_container_width=True)
-    st.download_button(
-        "📥 Tải Excel", data=to_excel(df), file_name="bds.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+---
+
+### Các bước thực hiện
+
+**Bước 1 — Lấy link tìm kiếm**
+
+Tìm kiếm trên Google theo cú pháp:
+> `site:batdongsan.com.vn bán nhà [tên khu vực]`
+
+Ví dụ: `site:batdongsan.com.vn bán nhà quận 7 tp hcm`
+
+Hoặc vào trực tiếp trang web → tìm kiếm theo khu vực → copy URL trên thanh địa chỉ trình duyệt.
+
+**Bước 2 — Dán link vào app**
+
+Dán link vào ô tương ứng (alonhadat / batdongsan / muaban).
+
+**Bước 3 — Chọn số trang**
+
+Mặc định 3 trang ≈ 60 tin. Tăng lên nếu cần nhiều mẫu hơn.
+
+**Bước 4 — Nhấn Scrape**
+
+> ⚡ Nếu khu vực đã được tra cứu trong vòng 6 giờ, kết quả hiện **ngay lập tức**.
+
+---
+
+### Ý nghĩa các cột kết quả
+
+| Cột | Ý nghĩa |
+|---|---|
+| `gia` | Giá rao bán |
+| `dien_tich` | Diện tích đất |
+| `loai_duong` | Mặt tiền / hẻm |
+| `gia_nha (tr)` | Giá trị phần nhà (số tầng × diện tích × 5 tr/m²) |
+| `don_gia_dat (tr/m²)` | Đơn giá đất sau khi trừ giá nhà |
+
+> 🔴 **Ô màu đỏ** = đơn giá đất âm → cần kiểm tra lại thông tin
+
+---
+
+### Lưu ý
+- Dữ liệu chỉ mang tính **tham khảo** từ giá rao bán thực tế
+- Nên lấy ít nhất **2-3 trang** để có đủ mẫu so sánh
+- Kết quả sắp xếp theo **diện tích tăng dần**
+- Đơn giá xây dựng mặc định: **5 triệu/m²**
+""")
+
+with tab_main:
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        url_aln = st.text_input("alonhadat.com.vn", placeholder="https://alonhadat.com.vn/...")
+    with col2:
+        url_bds = st.text_input("batdongsan.com.vn", placeholder="https://batdongsan.com.vn/...")
+    with col3:
+        url_mb  = st.text_input("muaban.net", placeholder="https://muaban.net/...")
+
+    num_pages = st.slider("Số trang cần scrape", 1, 20, 3)
+    cloud_mode = st.toggle(
+        "☁️ Chế độ Cloud (tắt khi chạy local để giải CAPTCHA alonhadat)",
+        value=True,
+        help="Bật khi deploy trên Streamlit Cloud. Tắt khi chạy máy tính cá nhân để dùng browser thật giải CAPTCHA."
     )
 
-# Hiển thị lại kết quả cũ nếu đã có trong session
-if st.session_state.df_result is not None:
-    _show_results(st.session_state.df_result)
+    if "df_result" not in st.session_state:
+        st.session_state.df_result = None
 
-if st.button("🚀 Scrape", use_container_width=True):
-    if not any([url_aln, url_bds, url_mb]):
-        st.warning("Vui lòng dán ít nhất 1 link.")
-    else:
-        results = []
-        log_box = st.empty()
-        logs: list[str] = []
+    def _show_results(df):
+        st.success(f"Tổng cộng {len(df)} bài đăng")
+        show_cols = ["nguon", "tieu_de", "gia", "dien_tich", "dia_chi",
+                     "loai_duong", "gia_nha (tr)", "don_gia_dat (tr/m²)"]
+        show_cols = [c for c in show_cols if c in df.columns]
+        styler = df[show_cols].style
+        if "don_gia_dat (tr/m²)" in show_cols:
+            styler = styler.map(
+                lambda v: "background-color: #FF9999" if isinstance(v, (int, float)) and v < 0 else "",
+                subset=["don_gia_dat (tr/m²)"]
+            )
+        st.dataframe(styler, use_container_width=True)
+        st.download_button(
+            "📥 Tải Excel", data=to_excel(df), file_name="bds.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
 
-        def log(msg: str):
-            logs.append(msg)
-            log_box.code("\n".join(logs[-20:]))
+    if st.session_state.df_result is not None:
+        _show_results(st.session_state.df_result)
 
-        def run_with_cache(nguon, url, scrape_fn, *args):
-            if not url:
-                return
-            key = _cache_key(nguon, url, num_pages)
-            hit = cache_get(key)
-            if hit:
-                rows, scraped_at = hit
-                age_min = int((datetime.now() - datetime.fromisoformat(scraped_at)).total_seconds() / 60)
-                log(f"[{nguon}] cache — {len(rows)} bài (cập nhật {age_min} phút trước)")
-                results.extend(rows)
-                return
-            st.write(f"📥 Đang scrape {nguon}…")
-            with _scrape_lock:
-                try:
-                    rows = scrape_fn(*args)
-                    cache_set(key, rows)
-                    results.extend(rows)
-                    log(f"[{nguon}] xong — {len(rows)} bài (đã lưu cache)")
-                except Exception as e:
-                    st.warning(f"{nguon} lỗi: {e}")
-
-        run_with_cache("alonhadat", url_aln, scrape_alonhadat,
-                       url_aln.strip(), num_pages, log, cloud_mode)
-        run_with_cache("batdongsan", url_bds, scrape_batdongsan,
-                       url_bds.strip(), num_pages, log)
-        run_with_cache("muaban", url_mb, scrape_muaban,
-                       url_mb.strip(), num_pages, log)
-
-        if results:
-            df = pd.DataFrame(results)
-            df = tinh_toan(df)
-            st.session_state.df_result = df
-            _show_results(df)
+    if st.button("🚀 Scrape", use_container_width=True):
+        if not any([url_aln, url_bds, url_mb]):
+            st.warning("Vui lòng dán ít nhất 1 link.")
         else:
-            st.info("Không tìm thấy bài đăng nào.")
+            results = []
+            log_box = st.empty()
+            logs: list[str] = []
+
+            def log(msg: str):
+                logs.append(msg)
+                log_box.code("\n".join(logs[-20:]))
+
+            def run_with_cache(nguon, url, scrape_fn, *args):
+                if not url:
+                    return
+                key = _cache_key(nguon, url, num_pages)
+                hit = cache_get(key)
+                if hit:
+                    rows, scraped_at = hit
+                    age_min = int((datetime.now() - datetime.fromisoformat(scraped_at)).total_seconds() / 60)
+                    log(f"[{nguon}] cache — {len(rows)} bài (cập nhật {age_min} phút trước)")
+                    results.extend(rows)
+                    return
+                st.write(f"📥 Đang scrape {nguon}…")
+                with _scrape_lock:
+                    try:
+                        rows = scrape_fn(*args)
+                        cache_set(key, rows)
+                        results.extend(rows)
+                        log(f"[{nguon}] xong — {len(rows)} bài (đã lưu cache)")
+                    except Exception as e:
+                        st.warning(f"{nguon} lỗi: {e}")
+
+            run_with_cache("alonhadat", url_aln, scrape_alonhadat,
+                           url_aln.strip(), num_pages, log, cloud_mode)
+            run_with_cache("batdongsan", url_bds, scrape_batdongsan,
+                           url_bds.strip(), num_pages, log)
+            run_with_cache("muaban", url_mb, scrape_muaban,
+                           url_mb.strip(), num_pages, log)
+
+            if results:
+                df = pd.DataFrame(results)
+                df = tinh_toan(df)
+                st.session_state.df_result = df
+                _show_results(df)
+            else:
+                st.info("Không tìm thấy bài đăng nào.")
