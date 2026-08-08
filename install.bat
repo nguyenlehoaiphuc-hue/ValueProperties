@@ -1,41 +1,49 @@
 @echo off
 cd /d "%~dp0"
-
 echo ======================================
 echo   BDS Scraper - Cai dat lan dau
 echo ======================================
 echo.
 
-if exist "python-embed\python.exe" (
+if exist "venv\Scripts\python.exe" (
     echo Da cai dat roi! Chay run.bat de su dung.
     pause
     exit /b 0
 )
 
-echo [1/4] Dang tai Python portable...
-powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip' -OutFile 'py.zip'"
-if not exist py.zip (
-    echo LOI: Khong tai duoc Python. Kiem tra ket noi mang roi thu lai.
+REM Uu tien dung Python da cai san tren may
+python --version >nul 2>&1
+if %errorlevel% == 0 (
+    echo Tim thay Python tren may, dang tao moi truong...
+    python -m venv venv
+    goto :install_packages
+)
+
+python3 --version >nul 2>&1
+if %errorlevel% == 0 (
+    echo Tim thay Python3 tren may, dang tao moi truong...
+    python3 -m venv venv
+    goto :install_packages
+)
+
+REM Khong co Python, tai portable
+echo Chua co Python, dang tai Python portable (~25MB)...
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9.exe' -OutFile 'python-installer.exe'"
+if not exist python-installer.exe (
+    echo LOI: Khong tai duoc Python. Kiem tra ket noi mang.
     pause
     exit /b 1
 )
+echo Dang cai Python (can quyen admin)...
+python-installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+del python-installer.exe
+python -m venv venv
 
-echo [2/4] Giai nen Python...
-powershell -Command "Expand-Archive -Path 'py.zip' -DestinationPath 'python-embed' -Force"
-del py.zip
-
-for /f %%i in ('dir /b "python-embed\*.pth" 2^>nul') do (
-    powershell -Command "(Get-Content 'python-embed\%%i') -replace '#import site','import site' | Set-Content 'python-embed\%%i'"
-)
-
-echo [3/4] Cai dat pip...
-powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
-python-embed\python.exe get-pip.py --no-warn-script-location -q
-del get-pip.py
-
-echo [4/4] Cai dat thu vien va trinh duyet (mat 3-5 phut)...
-python-embed\python.exe -m pip install streamlit playwright beautifulsoup4 pandas openpyxl streamlit-authenticator pyyaml bcrypt --no-warn-script-location -q
-python-embed\python.exe -m playwright install chromium
+:install_packages
+echo Dang cai dat thu vien (mat 3-5 phut)...
+venv\Scripts\python.exe -m pip install streamlit playwright beautifulsoup4 pandas openpyxl streamlit-authenticator pyyaml bcrypt -q
+echo Dang cai trinh duyet...
+venv\Scripts\python.exe -m playwright install chromium
 
 echo.
 echo ======================================
