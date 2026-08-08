@@ -1,14 +1,13 @@
 @echo off
-chcp 65001 > nul
 cd /d "%~dp0"
-echo.
-echo  ╔══════════════════════════════════════╗
-echo  ║        BDS Scraper                  ║
-echo  ╚══════════════════════════════════════╝
+
+echo ======================================
+echo   BDS Scraper
+echo ======================================
 echo.
 
 if not exist "python-embed\python.exe" (
-    echo Chua cai dat! Hay chay file install.bat truoc.
+    echo Chua cai dat! Hay chay install.bat truoc.
     pause
     exit /b 1
 )
